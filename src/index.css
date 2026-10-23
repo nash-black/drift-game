@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background-color: #090b10;
+    color: #f1f5f9;
+    user-select: none;
+    -webkit-user-select: none;
+    overflow: hidden;
+  }
+}
+
+.font-display {
+  font-family: 'Archivo', 'Outfit', sans-serif;
+}
+
+.font-mono-numbers {
+  font-family: 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Custom scanline / road subtle overlay */
+@keyframes speed-lines {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100%); }
+}
