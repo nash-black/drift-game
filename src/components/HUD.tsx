@@ -12,9 +12,18 @@ interface HUDProps {
   isMuted: boolean;
   onToggleMute: () => void;
   onPause: () => void;
+  largeHud?: boolean;
+  modeLabel?: string;
 }
 
-export const HUD: React.FC<HUDProps> = ({ stats, isMuted, onToggleMute, onPause }) => {
+export const HUD: React.FC<HUDProps> = ({
+  stats,
+  isMuted,
+  onToggleMute,
+  onPause,
+  largeHud = false,
+  modeLabel = 'ENDLESS',
+}) => {
   // Speed percentage for speedometer gauge (0 - 200 mph)
   const speedPct = Math.min(100, (stats.speedMph / 185) * 100);
 
@@ -23,14 +32,14 @@ export const HUD: React.FC<HUDProps> = ({ stats, isMuted, onToggleMute, onPause 
     stats.health > 60 ? 'bg-emerald-500' : stats.health > 25 ? 'bg-amber-500' : 'bg-rose-500';
 
   return (
-    <div className="absolute inset-0 pointer-events-none p-3 md:p-6 flex flex-col justify-between select-none">
+    <div className={`absolute inset-0 pointer-events-none p-3 md:p-6 flex flex-col justify-between select-none ${largeHud ? 'text-base' : ''}`}>
       {/* Top Bar Header Cluster */}
       <div className="flex items-start justify-between gap-4">
         {/* Left: Speedometer & Nitro */}
         <div className="pointer-events-auto flex items-center gap-3 bg-slate-950/80 backdrop-blur-md border border-slate-800/80 rounded-xl px-4 py-2.5 shadow-xl">
           <div className="flex flex-col">
             <div className="flex items-baseline gap-1">
-              <span className="font-display font-black text-3xl md:text-4xl tracking-tighter text-white font-mono-numbers">
+              <span className={`font-display font-black tracking-tighter text-white font-mono-numbers ${largeHud ? 'text-4xl md:text-5xl' : 'text-3xl md:text-4xl'}`}>
                 {stats.speedMph}
               </span>
               <span className="text-xs font-semibold uppercase text-slate-400 tracking-wider">
@@ -62,7 +71,7 @@ export const HUD: React.FC<HUDProps> = ({ stats, isMuted, onToggleMute, onPause 
             <span className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">
               Score
             </span>
-            <span className="font-display font-black text-2xl md:text-3xl text-amber-400 tracking-tight font-mono-numbers">
+            <span className={`font-display font-black text-amber-400 tracking-tight font-mono-numbers ${largeHud ? 'text-3xl md:text-4xl' : 'text-2xl md:text-3xl'}`}>
               {stats.score.toLocaleString()}
             </span>
             <div className="flex items-center gap-3 text-xs text-slate-300 mt-0.5 font-mono-numbers">
@@ -70,7 +79,26 @@ export const HUD: React.FC<HUDProps> = ({ stats, isMuted, onToggleMute, onPause 
               <span>·</span>
               <span className="text-amber-300 font-medium">★ {stats.coins}</span>
             </div>
+            <div className="mt-1 flex items-center gap-2 text-[10px] uppercase tracking-wider text-cyan-300">
+              <span>{modeLabel}</span>
+              {modeLabel === 'TIME TRIAL' && <span className="font-mono-numbers">{Math.ceil(stats.timeRemaining)}s</span>}
+              {modeLabel === 'DAILY CHALLENGE' && <span className="font-mono-numbers">{stats.challengeProgress}/8 coins</span>}
+            </div>
+            <div className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              {stats.routesTaken} {stats.routesTaken === 1 ? 'route' : 'routes'} taken
+            </div>
           </div>
+
+          {stats.junctionDistance > 0 && stats.junctionDistance < 220 && (
+            <div className="mt-2 rounded-lg border border-amber-300/50 bg-slate-950/90 px-3 py-1.5 text-center text-xs font-bold uppercase tracking-wide text-amber-200 shadow-lg">
+              <div>Junction · {Math.ceil(stats.junctionDistance)} m</div>
+              <div className="mt-0.5 text-[10px] text-white">
+                {stats.routeChoice
+                  ? `${stats.routeChoice} route selected`
+                  : 'Press A / D to choose · straight by default'}
+              </div>
+            </div>
+          )}
 
           {/* Active Power-ups Banners */}
           <div className="flex items-center gap-2 mt-2">
@@ -89,6 +117,11 @@ export const HUD: React.FC<HUDProps> = ({ stats, isMuted, onToggleMute, onPause 
             {stats.combo > 1 && (
               <div className="bg-rose-500/90 text-white font-black px-2.5 py-0.5 rounded-lg text-xs shadow-lg font-mono-numbers">
                 {stats.combo}X COMBO
+              </div>
+            )}
+            {stats.driftChain > 0.2 && (
+              <div className="rounded-lg border border-cyan-300/50 bg-cyan-950/85 px-2.5 py-0.5 text-xs font-black text-cyan-200 shadow-lg font-mono-numbers">
+                DRIFT {stats.driftChain.toFixed(1)}s · {stats.driftScore.toLocaleString()}
               </div>
             )}
           </div>
@@ -140,7 +173,7 @@ export const HUD: React.FC<HUDProps> = ({ stats, isMuted, onToggleMute, onPause 
         <div className="bg-slate-950/60 backdrop-blur-sm px-3 py-1.5 rounded-lg border border-slate-800/60 text-slate-300">
           <kbd className="px-1.5 py-0.5 bg-slate-800 rounded text-[11px] font-mono mr-1">A / D</kbd> Steer ·{' '}
           <kbd className="px-1.5 py-0.5 bg-slate-800 rounded text-[11px] font-mono mr-1">W / Space</kbd> Nitro ·{' '}
-          <kbd className="px-1.5 py-0.5 bg-slate-800 rounded text-[11px] font-mono mr-1">S</kbd> Brake
+          <kbd className="px-1.5 py-0.5 bg-slate-800 rounded text-[11px] font-mono mr-1">S / SHIFT</kbd> Brake / Drift
         </div>
       </div>
     </div>

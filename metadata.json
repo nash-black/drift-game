@@ -1,6 +1,6 @@
 {
-  "name": "Turbo Horizon: 2D Highway Racer",
-  "description": "An arcade 2D highway racing game with responsive controls, traffic avoidance, realistic road physics, dynamic audio, and high-speed close calls.",
+  "name": "Turbo Horizon: 3D Junction Racer",
+  "description": "An arcade 3D road racer with branching junctions, responsive drifting, traffic avoidance, dynamic audio, and high-speed challenges.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

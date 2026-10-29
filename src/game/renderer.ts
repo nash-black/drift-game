@@ -147,6 +147,13 @@ export class GameRenderer {
     ctx.fillStyle = asphaltGrad;
     ctx.fillRect(rx, 0, rw, h);
 
+    const surfaceGlow = ctx.createLinearGradient(rx, 0, rx + rw, 0);
+    surfaceGlow.addColorStop(0, 'rgba(255, 255, 255, 0)');
+    surfaceGlow.addColorStop(0.5, timeOfDay === 'night' ? 'rgba(125, 211, 252, 0.045)' : 'rgba(255, 255, 255, 0.055)');
+    surfaceGlow.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = surfaceGlow;
+    ctx.fillRect(rx, 0, rw, h);
+
     // Subtle road grain / horizontal texture lines
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.025)';
     ctx.lineWidth = 1;
@@ -235,6 +242,19 @@ export class GameRenderer {
         ctx.stroke();
       }
     }
+
+    const vignette = ctx.createRadialGradient(
+      w / 2,
+      h * 0.42,
+      Math.min(w, h) * 0.2,
+      w / 2,
+      h * 0.42,
+      Math.max(w, h) * 0.72
+    );
+    vignette.addColorStop(0, 'rgba(2, 6, 23, 0)');
+    vignette.addColorStop(1, timeOfDay === 'night' ? 'rgba(2, 6, 23, 0.48)' : 'rgba(2, 6, 23, 0.32)');
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, w, h);
   }
 
   private renderGuardRails(leftX: number, rightX: number) {
@@ -731,7 +751,7 @@ export class GameRenderer {
     ctx.restore();
   }
 
-  public renderPickups(pickups: Pickup[]) {
+  public renderPickups(pickups: Pickup[], showLabels: boolean = false) {
     const ctx = this.ctx;
 
     for (const p of pickups) {
@@ -758,12 +778,17 @@ export class GameRenderer {
         ctx.arc(0, 0, 14, 0, Math.PI * 2);
         ctx.fill();
 
-        // Lightning Icon
+        // Lightning icon
         ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 16px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('⚡', 0, 1);
+        ctx.beginPath();
+        ctx.moveTo(2, -10);
+        ctx.lineTo(-6, 1);
+        ctx.lineTo(-1, 1);
+        ctx.lineTo(-3, 10);
+        ctx.lineTo(6, -2);
+        ctx.lineTo(1, -2);
+        ctx.closePath();
+        ctx.fill();
         ctx.shadowBlur = 0;
       } else if (p.type === 'shield') {
         // Iridescent Cyan/Violet Shield Orb
@@ -786,10 +811,18 @@ export class GameRenderer {
 
         // Shield crest symbol
         ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 15px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('🛡️', 0, 1);
+        ctx.beginPath();
+        ctx.moveTo(0, -10);
+        ctx.lineTo(7, -7);
+        ctx.lineTo(6, 2);
+        ctx.quadraticCurveTo(4, 7, 0, 10);
+        ctx.quadraticCurveTo(-4, 7, -6, 2);
+        ctx.lineTo(-7, -7);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = '#0e7490';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
         ctx.shadowBlur = 0;
       } else if (p.type === 'coin') {
         const scaleX = Math.cos(p.bobTimer * 5);
@@ -808,11 +841,14 @@ export class GameRenderer {
         ctx.fill();
         ctx.shadowBlur = 0;
 
-        ctx.fillStyle = '#78350f';
-        ctx.font = 'bold 11px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('★', 0, 1);
+        ctx.strokeStyle = '#78350f';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, -5);
+        ctx.lineTo(0, 5);
+        ctx.moveTo(-5, 0);
+        ctx.lineTo(5, 0);
+        ctx.stroke();
       } else if (p.type === 'nitro') {
         ctx.shadowColor = '#06b6d4';
         ctx.shadowBlur = 12;
@@ -826,10 +862,15 @@ export class GameRenderer {
         ctx.fillRect(-4, -16, 8, 4);
 
         ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 10px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('⚡', 0, 0);
+        ctx.beginPath();
+        ctx.moveTo(1, -7);
+        ctx.lineTo(-4, 1);
+        ctx.lineTo(-1, 1);
+        ctx.lineTo(-2, 7);
+        ctx.lineTo(4, -2);
+        ctx.lineTo(1, -2);
+        ctx.closePath();
+        ctx.fill();
         ctx.shadowBlur = 0;
       } else if (p.type === 'repair') {
         ctx.shadowColor = '#10b981';
@@ -844,6 +885,25 @@ export class GameRenderer {
         ctx.fillRect(-7, -2, 14, 4);
         ctx.fillRect(-2, -7, 4, 14);
         ctx.shadowBlur = 0;
+      }
+
+      if (showLabels) {
+        const label = {
+          coin: 'COIN',
+          nitro: 'NITRO',
+          repair: 'FIX',
+          speed_boost: 'BOOST',
+          shield: 'SHIELD',
+        }[p.type];
+        ctx.fillStyle = 'rgba(2, 6, 23, 0.88)';
+        ctx.beginPath();
+        ctx.roundRect(-20, 19, 40, 13, 4);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 8px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, 0, 25.5);
       }
 
       ctx.restore();

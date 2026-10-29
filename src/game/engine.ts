@@ -4,10 +4,14 @@
  */
 
 import { sound } from './audio';
-import { GameRenderer, CAR_SKINS } from './renderer';
+import { CAR_SKINS } from './renderer';
+import { GameRenderer, JUNCTION_SPACING } from './renderer3d';
+import { DAILY_CHALLENGE_TARGET, TIME_TRIAL_SECONDS } from '../services/progress';
 import {
   CarSkin,
   FloatingText,
+  GameMode,
+  GameSettings,
   GameState,
   GameStats,
   InputState,
@@ -23,7 +27,6 @@ import {
 
 export class RacingGameEngine {
   private canvas: HTMLCanvasElement;
-  private ctx: CanvasRenderingContext2D;
   private renderer: GameRenderer;
   private animFrameId: number | null = null;
   private lastTime: number = 0;
@@ -35,11 +38,20 @@ export class RacingGameEngine {
   // Callback listeners
   private onStatsChange?: (stats: GameStats) => void;
   private onStateChange?: (state: GameState) => void;
+  private onRunComplete?: (stats: GameStats, mode: GameMode) => void;
+  private mode: GameMode = 'endless';
+  private settings: GameSettings | null = null;
 
   // Road & Dimensions
   private width: number = 800;
   private height: number = 900;
   private roadOffset: number = 0;
+  private routeChoice: -1 | 1 | null = null;
+  private routesTaken = 0;
+  private playerLateralVelocity: number = 0;
+  private roadEdgeContactCooldown: number = 0;
+  private driftTime: number = 0;
+  private elapsedTime: number = 0;
   private timeOfDay: TimeOfDay = 'day';
   private dayTimer: number = 0;
 
@@ -112,6 +124,15 @@ export class RacingGameEngine {
     combo: 1,
     comboTimer: 0,
     closeCalls: 0,
+    driftScore: 0,
+    driftChain: 0,
+    bestDriftChain: 0,
+    raceTime: 0,
+    timeRemaining: 0,
+    challengeProgress: 0,
+    junctionDistance: JUNCTION_SPACING,
+    routeChoice: null,
+    routesTaken: 0,
     speedBoostActive: false,
     speedBoostTimer: 0,
     shieldActive: false,
@@ -123,15 +144,14 @@ export class RacingGameEngine {
     callbacks?: {
       onStatsChange?: (stats: GameStats) => void;
       onStateChange?: (state: GameState) => void;
+      onRunComplete?: (stats: GameStats, mode: GameMode) => void;
     }
   ) {
     this.canvas = canvas;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('Could not get 2D context from canvas');
-    this.ctx = ctx;
-    this.renderer = new GameRenderer(ctx);
+    this.renderer = new GameRenderer(canvas);
     this.onStatsChange = callbacks?.onStatsChange;
     this.onStateChange = callbacks?.onStateChange;
+    this.onRunComplete = callbacks?.onRunComplete;
 
     const savedHigh = localStorage.getItem('turbo_horizon_high_score');
     if (savedHigh) {
@@ -149,21 +169,21 @@ export class RacingGameEngine {
     this.player.secondaryColor = skin.secondary;
   }
 
+  public configure(settings: GameSettings, mode: GameMode) {
+    this.settings = settings;
+    this.mode = mode;
+    this.player.handling = 540 * settings.steeringSensitivity;
+    this.renderer.setReducedMotion(settings.reducedMotion);
+  }
+
   public resize() {
     const parent = this.canvas.parentElement;
     const rect = parent ? parent.getBoundingClientRect() : { width: window.innerWidth, height: window.innerHeight };
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-
     this.width = Math.max(rect.width, 360);
     this.height = Math.max(rect.height, 500);
 
-    this.canvas.width = this.width * dpr;
-    this.canvas.height = this.height * dpr;
     this.canvas.style.width = `${this.width}px`;
     this.canvas.style.height = `${this.height}px`;
-
-    this.ctx.resetTransform?.();
-    this.ctx.scale(dpr, dpr);
 
     const roadW = Math.min(460, this.width * 0.88);
     this.renderer.setDimensions(this.width, this.height, roadW);
@@ -202,19 +222,12 @@ export class RacingGameEngine {
     window.addEventListener('keydown', this.handleKeyDown);
     window.addEventListener('keyup', this.handleKeyUp);
     window.addEventListener('blur', this.handleBlur);
-    window.addEventListener('resize', () => this.resize());
+    window.addEventListener('resize', this.handleResize);
   }
 
-  private handleBlur = () => {
-    this.inputs = {
-      left: false,
-      right: false,
-      up: false,
-      down: false,
-      nitro: false,
-      brake: false,
-    };
-  };
+  private handleResize = () => this.resize();
+
+  private handleBlur = () => this.clearInputs();
 
   private handleKeyDown = (e: KeyboardEvent) => {
     if (this.state === 'TITLE') {
@@ -243,8 +256,8 @@ export class RacingGameEngine {
       if (e.code === 'KeyP' || e.code === 'Escape') {
         e.preventDefault();
         this.togglePause();
-        return;
       }
+      return;
     }
 
     switch (e.code) {
@@ -267,6 +280,10 @@ export class RacingGameEngine {
       case 'KeyS':
         e.preventDefault();
         this.inputs.down = true;
+        this.inputs.brake = true;
+        break;
+      case 'ShiftLeft':
+      case 'ShiftRight':
         this.inputs.brake = true;
         break;
       case 'Space':
@@ -293,7 +310,11 @@ export class RacingGameEngine {
       case 'ArrowDown':
       case 'KeyS':
         this.inputs.down = false;
-        this.inputs.brake = false;
+        this.inputs.brake = e.getModifierState('Shift');
+        break;
+      case 'ShiftLeft':
+      case 'ShiftRight':
+        this.inputs.brake = this.inputs.down || e.getModifierState('Shift');
         break;
       case 'Space':
         this.inputs.nitro = false;
@@ -319,6 +340,7 @@ export class RacingGameEngine {
   public togglePause() {
     if (this.state === 'PLAYING') {
       this.state = 'PAUSED';
+      this.clearInputs();
       sound.stopEngine();
       sound.stopBgm();
     } else if (this.state === 'PAUSED') {
@@ -338,13 +360,30 @@ export class RacingGameEngine {
     sound.startBgm();
   }
 
+  public returnToTitle() {
+    this.clearInputs();
+    this.state = 'TITLE';
+    this.onStateChange?.(this.state);
+    sound.stopEngine();
+    sound.stopBgm();
+  }
+
   private resetGameplayState() {
     const bounds = this.renderer.getRoadBounds();
+    this.roadOffset = 0;
+    this.routeChoice = null;
+    this.routesTaken = 0;
+    this.renderer.resetRoutes();
     this.player.x = bounds.x + bounds.width / 2;
     this.player.y = this.height * 0.76;
     this.player.speed = 65;
+    this.playerLateralVelocity = 0;
+    this.roadEdgeContactCooldown = 0;
+    this.driftTime = 0;
+    this.elapsedTime = 0;
     this.player.angle = 0;
     this.player.targetAngle = 0;
+    this.clearInputs();
 
     this.enemies = [];
     this.pickups = [];
@@ -370,6 +409,15 @@ export class RacingGameEngine {
       combo: 1,
       comboTimer: 0,
       closeCalls: 0,
+      driftScore: 0,
+      driftChain: 0,
+      bestDriftChain: 0,
+      raceTime: 0,
+      timeRemaining: this.mode === 'time_trial' ? TIME_TRIAL_SECONDS : 0,
+      challengeProgress: 0,
+      junctionDistance: JUNCTION_SPACING,
+      routeChoice: null,
+      routesTaken: 0,
       speedBoostActive: false,
       speedBoostTimer: 0,
       shieldActive: false,
@@ -379,6 +427,7 @@ export class RacingGameEngine {
   }
 
   public startLoop() {
+    if (this.animFrameId !== null) return;
     this.lastTime = performance.now();
     const tick = (now: number) => {
       const rawDt = (now - this.lastTime) / 1000;
@@ -394,7 +443,7 @@ export class RacingGameEngine {
   }
 
   public stopLoop() {
-    if (this.animFrameId) {
+    if (this.animFrameId !== null) {
       cancelAnimationFrame(this.animFrameId);
       this.animFrameId = null;
     }
@@ -443,6 +492,7 @@ export class RacingGameEngine {
 
   private updatePlayingState(dt: number) {
     const bounds = this.renderer.getRoadBounds();
+    this.roadEdgeContactCooldown = Math.max(0, this.roadEdgeContactCooldown - dt);
 
     if (this.isCrashing) {
       this.crashTimer += dt;
@@ -458,6 +508,16 @@ export class RacingGameEngine {
         this.triggerGameOver();
       }
       return;
+    }
+
+    this.elapsedTime += dt;
+    this.stats.raceTime = this.elapsedTime;
+    if (this.mode === 'time_trial') {
+      this.stats.timeRemaining = Math.max(0, TIME_TRIAL_SECONDS - this.elapsedTime);
+      if (this.stats.timeRemaining === 0) {
+        this.triggerGameOver();
+        return;
+      }
     }
 
     // 1. Power-up timers countdown
@@ -523,39 +583,61 @@ export class RacingGameEngine {
     sound.updateEngine(speedRatio, isBoosting);
 
     // 3. Lateral Movement / Steering
-    const steerSpeed = (this.player.handling + (isBoosting ? 70 : 0)) * (this.player.speed / 100);
+    const steerInput = Number(this.inputs.right) - Number(this.inputs.left);
+    const steerAcceleration =
+      (this.player.handling + (isBoosting ? 70 : 0)) * (this.player.speed / 100);
+    const grip = isBraking ? 0.65 : 3.2;
+    const maxLateralSpeed = 240 + Math.min(70, this.player.speed * 0.35);
 
-    if (this.inputs.left) {
-      this.player.x -= steerSpeed * dt;
-      this.player.targetAngle = -0.12;
-    }
-    if (this.inputs.right) {
-      this.player.x += steerSpeed * dt;
-      this.player.targetAngle = 0.12;
-    }
-    if (!this.inputs.left && !this.inputs.right) {
-      this.player.targetAngle = 0;
-    }
+    this.playerLateralVelocity += steerInput * steerAcceleration * dt;
+    this.playerLateralVelocity *= Math.exp(-grip * dt);
+    this.playerLateralVelocity = Math.max(
+      -maxLateralSpeed,
+      Math.min(maxLateralSpeed, this.playerLateralVelocity)
+    );
+    this.player.x += this.playerLateralVelocity * dt;
 
-    this.player.angle += (this.player.targetAngle - this.player.angle) * dt * 14;
+    const driftAngle = (this.playerLateralVelocity / maxLateralSpeed) * -0.2;
+    this.player.targetAngle = Math.max(-0.24, Math.min(0.24, steerInput * 0.08 + driftAngle));
+    this.player.angle += (this.player.targetAngle - this.player.angle) * (1 - Math.exp(-14 * dt));
 
     const minX = bounds.x + this.player.width / 2 + 8;
     const maxX = bounds.x + bounds.width - this.player.width / 2 - 8;
 
     if (this.player.x < minX) {
       this.player.x = minX;
+      this.playerLateralVelocity = Math.max(0, this.playerLateralVelocity);
       this.player.speed = Math.max(40, this.player.speed - dt * 50);
-      sound.playScreech();
-      this.addSmoke(this.player.x, this.player.y + 30);
+      if (this.roadEdgeContactCooldown <= 0) {
+        sound.playScreech();
+        this.addSmoke(this.player.x, this.player.y + 30);
+        this.roadEdgeContactCooldown = 0.16;
+      }
     } else if (this.player.x > maxX) {
       this.player.x = maxX;
+      this.playerLateralVelocity = Math.min(0, this.playerLateralVelocity);
       this.player.speed = Math.max(40, this.player.speed - dt * 50);
-      sound.playScreech();
-      this.addSmoke(this.player.x, this.player.y + 30);
+      if (this.roadEdgeContactCooldown <= 0) {
+        sound.playScreech();
+        this.addSmoke(this.player.x, this.player.y + 30);
+        this.roadEdgeContactCooldown = 0.16;
+      }
     }
 
-    if (isBraking || (Math.abs(this.player.angle) > 0.08 && this.player.speed > 80)) {
-      if (Math.random() < 0.4) {
+    const isDrifting = Math.abs(this.playerLateralVelocity) > 105 && this.player.speed > 70;
+    if (isDrifting) {
+      this.driftTime += dt;
+      this.stats.driftChain = this.driftTime;
+      this.stats.bestDriftChain = Math.max(this.stats.bestDriftChain, this.driftTime);
+      const driftPoints = Math.round(Math.max(0, Math.abs(this.playerLateralVelocity) - 70) * dt * 0.18 * this.stats.combo);
+      this.stats.driftScore += driftPoints;
+      this.stats.score += driftPoints;
+    } else {
+      this.driftTime = 0;
+      this.stats.driftChain = 0;
+    }
+    if (isBraking || isDrifting) {
+      if (Math.random() < 1 - Math.exp(-24 * dt)) {
         sound.playScreech();
         this.addSkidMark(this.player.x - 14, this.player.y + 36);
         this.addSkidMark(this.player.x + 14, this.player.y + 36);
@@ -566,12 +648,14 @@ export class RacingGameEngine {
 
     // 4. Road & Scenery Scrolling
     const roadScrollSpeed = this.player.speed * 8 * dt;
+    const previousProgress = this.roadOffset * 0.12;
     this.roadOffset += roadScrollSpeed;
+    this.updateRouteJunctions(previousProgress, this.roadOffset * 0.12);
     this.updateRoadsideScenery(roadScrollSpeed);
     this.updateSkidMarks(roadScrollSpeed);
 
-    const distanceDelta = this.player.speed * dt * 0.447 * 2.2;
-    this.stats.distance += Math.round(distanceDelta);
+    const distanceDelta = this.player.speed * dt * 0.44704;
+    this.stats.distance += distanceDelta;
 
     const scoreMultiplier = this.stats.speedBoostActive ? this.stats.combo * 2 : this.stats.combo;
     const scoreDelta = Math.round((this.player.speed / 10) * dt * 12 * scoreMultiplier);
@@ -594,6 +678,30 @@ export class RacingGameEngine {
     this.checkCollisionsAndNearMisses();
 
     this.onStatsChange?.(this.stats);
+    if (this.mode === 'daily_challenge' && this.stats.challengeProgress >= DAILY_CHALLENGE_TARGET) {
+      this.triggerGameOver();
+    }
+  }
+
+  private updateRouteJunctions(previousProgress: number, currentProgress: number) {
+    let nextJunction = (Math.floor(previousProgress / JUNCTION_SPACING) + 1) * JUNCTION_SPACING;
+    while (nextJunction <= currentProgress) {
+      this.renderer.addRouteTurn(this.routeChoice ?? 0, nextJunction);
+      this.routesTaken += 1;
+      this.routeChoice = null;
+      nextJunction += JUNCTION_SPACING;
+    }
+
+    this.stats.junctionDistance = Math.max(0, nextJunction - currentProgress);
+    if (this.stats.junctionDistance <= 220) {
+      if (this.inputs.left !== this.inputs.right) {
+        this.routeChoice = this.inputs.left ? -1 : 1;
+      }
+    } else {
+      this.routeChoice = null;
+    }
+    this.stats.routeChoice = this.routeChoice === -1 ? 'left' : this.routeChoice === 1 ? 'right' : null;
+    this.stats.routesTaken = this.routesTaken;
   }
 
   private updateRoadsideScenery(scrollDelta: number) {
@@ -784,7 +892,8 @@ export class RacingGameEngine {
 
     this.pickupSpawnTimer -= dt;
     if (this.pickupSpawnTimer <= 0) {
-      this.pickupSpawnTimer = 3.0 + Math.random() * 2.0;
+      this.pickupSpawnTimer =
+        this.mode === 'daily_challenge' ? 1.8 + Math.random() * 1.2 : 3.0 + Math.random() * 2.0;
 
       const lane = Math.floor(Math.random() * 4);
       const px = bounds.x + (lane + 0.5) * bounds.laneWidth;
@@ -792,7 +901,7 @@ export class RacingGameEngine {
 
       // Distribution: Coins 40%, Speed Boost 22%, Shield 20%, Repair 10%, Nitro 8%
       let type: PickupType = 'coin';
-      if (roll < 0.4) {
+      if (roll < (this.mode === 'daily_challenge' ? 0.62 : 0.4)) {
         type = 'coin';
       } else if (roll < 0.62) {
         type = 'speed_boost';
@@ -819,7 +928,7 @@ export class RacingGameEngine {
     for (let i = this.pickups.length - 1; i >= 0; i--) {
       const p = this.pickups[i];
       p.y += roadScrollDelta;
-      p.bobTimer += dt;
+      if (!this.settings?.reducedMotion) p.bobTimer += dt;
 
       const dx = Math.abs(p.x - this.player.x);
       const dy = Math.abs(p.y - this.player.y);
@@ -855,6 +964,7 @@ export class RacingGameEngine {
     } else if (p.type === 'coin') {
       sound.playCoin();
       this.stats.coins += 1;
+      this.stats.challengeProgress = this.stats.coins;
       const coinScore = 150 * this.stats.combo;
       this.stats.score += coinScore;
       this.addFloatingText(`+${coinScore}`, p.x, p.y, '#fbbf24', 18);
@@ -916,7 +1026,7 @@ export class RacingGameEngine {
         const bonus = 250 * this.stats.combo;
         this.stats.score += bonus;
         sound.playWhoosh();
-        this.screenShake = 3.5;
+        if (!this.settings?.reducedMotion) this.screenShake = 3.5;
 
         this.addFloatingText(`CLOSE CALL! +${bonus}`, px, py - 40, '#f43f5e', 22, true);
         if (this.stats.combo > 1) {
@@ -928,7 +1038,7 @@ export class RacingGameEngine {
 
   private handleShieldSmash(enemy: Vehicle) {
     sound.playShieldHit();
-    this.screenShake = 7;
+    if (!this.settings?.reducedMotion) this.screenShake = 7;
     enemy.isBlasted = true;
     const blastDir = enemy.x < this.player.x ? -1 : 1;
     enemy.blastVx = blastDir * (280 + Math.random() * 120);
@@ -959,8 +1069,12 @@ export class RacingGameEngine {
   private handleCrash(enemy: Vehicle) {
     if (this.isCrashing) return;
 
+    enemy.isBlasted = true;
+    enemy.blastVx = (enemy.x < this.player.x ? -1 : 1) * 110;
+    enemy.blastVy = -90;
+    enemy.blastRot = 0;
     sound.playCrash();
-    this.screenShake = 16;
+    if (!this.settings?.reducedMotion) this.screenShake = 16;
     this.hitstopTimer = 0.07;
 
     const impactSpeed = Math.abs(this.player.speed - enemy.speed);
@@ -971,12 +1085,18 @@ export class RacingGameEngine {
     this.addFloatingText(`CRASH -${damage}%`, this.player.x, this.player.y - 30, '#ef4444', 24, true);
 
     if (this.stats.health <= 0) {
-      this.isCrashing = true;
-      this.crashTimer = 0;
-      this.player.speed = 40;
+      if (this.mode === 'time_trial') {
+        this.stats.health = 1;
+        this.player.speed = 25;
+      } else {
+        this.isCrashing = true;
+        this.crashTimer = 0;
+        this.player.speed = 40;
+      }
     } else {
       const bounceDir = this.player.x < enemy.x ? -1 : 1;
       this.player.x += bounceDir * 35;
+      this.playerLateralVelocity = bounceDir * 70;
       this.player.speed = Math.max(35, this.player.speed - 30);
       sound.playScreech();
     }
@@ -994,6 +1114,7 @@ export class RacingGameEngine {
 
     this.onStateChange?.(this.state);
     this.onStatsChange?.(this.stats);
+    this.onRunComplete?.({ ...this.stats }, this.mode);
   }
 
   private addSmoke(x: number, y: number) {
@@ -1137,25 +1258,18 @@ export class RacingGameEngine {
   }
 
   private render() {
-    this.renderer.clear();
+    const shake = this.settings?.reducedMotion ? 0 : this.screenShake;
+    this.renderer.setCameraShake(shake);
 
-    if (this.screenShake > 0) {
-      const ox = (Math.random() - 0.5) * this.screenShake;
-      const oy = (Math.random() - 0.5) * this.screenShake;
-      this.ctx.save();
-      this.ctx.translate(ox, oy);
-    }
-
-    const speedRatio = this.player.speed / 100;
     this.renderer.renderEnvironment(
       this.roadOffset,
       this.timeOfDay,
       this.roadsideObjects,
       this.skidMarks,
-      speedRatio
+      this.stats.junctionDistance
     );
 
-    this.renderer.renderPickups(this.pickups);
+    this.renderer.renderPickups(this.pickups, this.settings?.colorblindPickups);
 
     for (const enemy of this.enemies) {
       this.renderer.renderEnemyCar(enemy, this.timeOfDay);
@@ -1173,12 +1287,19 @@ export class RacingGameEngine {
       this.stats.speedBoostActive
     );
 
-    this.renderer.renderParticles(this.particles);
+    this.renderer.renderParticles(this.settings?.reducedMotion ? [] : this.particles);
     this.renderer.renderFloatingTexts(this.floatingTexts);
+  }
 
-    if (this.screenShake > 0) {
-      this.ctx.restore();
-    }
+  private clearInputs() {
+    this.inputs = {
+      left: false,
+      right: false,
+      up: false,
+      down: false,
+      nitro: false,
+      brake: false,
+    };
   }
 
   public destroy() {
@@ -1186,5 +1307,7 @@ export class RacingGameEngine {
     window.removeEventListener('keydown', this.handleKeyDown);
     window.removeEventListener('keyup', this.handleKeyUp);
     window.removeEventListener('blur', this.handleBlur);
+    window.removeEventListener('resize', this.handleResize);
+    this.renderer.dispose();
   }
 }

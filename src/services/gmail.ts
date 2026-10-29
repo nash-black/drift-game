@@ -124,7 +124,7 @@ ${driverName} just completed a high-speed run on Turbo Horizon Highway!
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ${personalNote ? `Note from driver:\n"${personalNote}"\n\n` : ''}
-Sent directly from Turbo Horizon 2D Highway Racer via the official Gmail API.
+Sent directly from Turbo Horizon 3D Junction Racer via the official Gmail API.
 `;
 
   const rawEmail = [

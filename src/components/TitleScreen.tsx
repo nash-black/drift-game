@@ -6,9 +6,10 @@
 import React, { useState } from 'react';
 import { User } from 'firebase/auth';
 import { CAR_SKINS } from '../game/renderer';
-import { CarSkin } from '../game/types';
-import { Volume2, VolumeX, Play, Shield, Zap, Mail, LogOut, Check } from 'lucide-react';
+import { CarSkin, GameMode } from '../game/types';
+import { Volume2, VolumeX, Play, Shield, Zap, LogOut, Check, Settings, BookOpen, Lock, Trophy } from 'lucide-react';
 import { googleSignIn, logout } from '../services/gmail';
+import { DAILY_CHALLENGE_TARGET, SKIN_UNLOCK_COSTS } from '../services/progress';
 
 interface TitleScreenProps {
   onStart: () => void;
@@ -19,6 +20,15 @@ interface TitleScreenProps {
   onToggleMute: () => void;
   currentUser: User | null;
   onUserChange: (user: User | null) => void;
+  mode: GameMode;
+  onSelectMode: (mode: GameMode) => void;
+  bestScores: Record<GameMode, number>;
+  bankedCoins: number;
+  unlockedSkins: string[];
+  dailyChallengeCompleted: boolean;
+  garageNotice: string | null;
+  onOpenSettings: () => void;
+  onOpenTutorial: () => void;
 }
 
 export const TitleScreen: React.FC<TitleScreenProps> = ({
@@ -30,6 +40,15 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
   onToggleMute,
   currentUser,
   onUserChange,
+  mode,
+  onSelectMode,
+  bestScores,
+  bankedCoins,
+  unlockedSkins,
+  dailyChallengeCompleted,
+  garageNotice,
+  onOpenSettings,
+  onOpenTutorial,
 }) => {
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -56,18 +75,27 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
   };
 
   return (
-    <div className="absolute inset-0 z-30 flex flex-col justify-between p-4 md:p-8 bg-gradient-to-b from-slate-950/80 via-transparent to-slate-950/90 pointer-events-auto">
+    <div className="absolute inset-0 z-30 flex flex-col justify-between gap-4 overflow-y-auto p-4 md:p-8 bg-gradient-to-b from-slate-950/80 via-transparent to-slate-950/90 pointer-events-auto">
       {/* Top Header Bar */}
       <div className="flex items-center justify-between">
         {/* Audio Mute Switch */}
-        <button
-          onClick={onToggleMute}
-          aria-label={isMuted ? 'Unmute Audio' : 'Mute Audio'}
-          className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-900/80 border border-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer text-xs font-semibold backdrop-blur-md"
-        >
-          {isMuted ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4 text-emerald-400" />}
-          <span>{isMuted ? 'Audio Off' : 'Sound On'}</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onToggleMute}
+            aria-label={isMuted ? 'Unmute Audio' : 'Mute Audio'}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-900/80 border border-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer text-xs font-semibold backdrop-blur-md"
+          >
+            {isMuted ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4 text-emerald-400" />}
+            <span className="hidden sm:inline">{isMuted ? 'Audio Off' : 'Sound On'}</span>
+          </button>
+          <button type="button" onClick={onOpenSettings} aria-label="Open settings" className="rounded-xl border border-slate-700 bg-slate-900/80 p-2 text-slate-300 hover:text-white">
+            <Settings className="h-4 w-4" />
+          </button>
+          <button type="button" onClick={onOpenTutorial} aria-label="Open driving guide" className="rounded-xl border border-slate-700 bg-slate-900/80 p-2 text-slate-300 hover:text-white">
+            <BookOpen className="h-4 w-4" />
+          </button>
+        </div>
 
         {/* Gmail Auth / Account Button */}
         <div>
@@ -134,7 +162,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
       )}
 
       {/* Hero Title Lockup */}
-      <div className="flex flex-col items-center text-center my-auto">
+      <div className="flex flex-col items-center text-center">
         {/* Bespoke inline SVG Title */}
         <div className="relative mb-2">
           <svg className="w-72 sm:w-96 md:w-[480px] h-20 md:h-28" viewBox="0 0 500 110" fill="none">
@@ -171,7 +199,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             </text>
           </svg>
           <div className="text-xs uppercase tracking-[0.3em] text-slate-400 font-semibold mt-1">
-            2D Highway Circuit Racer
+            3D Junction Circuit Racer
           </div>
         </div>
 
@@ -184,25 +212,55 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
         )}
 
         {/* Start Game CTA */}
+        <section className="mb-4 w-full max-w-xl" aria-label="Choose race mode">
+          <div className="mb-2 flex items-center justify-center gap-2 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
+            <Trophy className="h-3.5 w-3.5 text-amber-300" /> Choose your event
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            {([
+              { id: 'endless', label: 'ENDLESS', detail: 'Survive the highway' },
+              { id: 'time_trial', label: 'TIME TRIAL', detail: '90-second sprint' },
+              { id: 'daily_challenge', label: 'DAILY', detail: `${DAILY_CHALLENGE_TARGET} coins` },
+            ] as { id: GameMode; label: string; detail: string }[]).map((event) => (
+              <button
+                type="button"
+                key={event.id}
+                onClick={() => onSelectMode(event.id)}
+                aria-pressed={mode === event.id}
+                className={`rounded-xl border p-2 text-left transition-colors sm:p-3 ${mode === event.id ? 'border-cyan-300 bg-cyan-950/90 text-white shadow-[0_0_18px_rgba(34,211,238,0.18)]' : 'border-slate-700 bg-slate-950/80 text-slate-300 hover:border-slate-500'}`}
+              >
+                <span className="block text-[10px] font-black tracking-wider sm:text-xs">{event.label}</span>
+                <span className="mt-1 block text-[9px] text-slate-400 sm:text-[10px]">{event.detail}</span>
+                <span className="mt-1 block text-[9px] font-mono text-amber-300">BEST {bestScores[event.id].toLocaleString()}</span>
+                {event.id === 'daily_challenge' && dailyChallengeCompleted && <span className="text-[9px] font-bold text-emerald-300">COMPLETED TODAY</span>}
+              </button>
+            ))}
+          </div>
+        </section>
+
         <button
+          type="button"
           onClick={onStart}
           className="group relative inline-flex items-center gap-3 px-8 md:px-12 py-4 rounded-2xl bg-gradient-to-r from-amber-500 via-rose-500 to-pink-500 text-slate-950 font-display font-black text-lg md:text-xl tracking-wider uppercase shadow-[0_0_30px_rgba(244,63,94,0.5)] hover:shadow-[0_0_45px_rgba(244,63,94,0.8)] active:scale-95 transition-all cursor-pointer mb-6"
         >
           <Play className="w-6 h-6 fill-slate-950 transition-transform group-hover:scale-110" />
-          <span>START RACE</span>
+          <span>{mode === 'time_trial' ? 'START TIME TRIAL' : mode === 'daily_challenge' ? 'START DAILY RUN' : 'START RACE'}</span>
           <span className="hidden sm:inline text-xs font-sans font-bold bg-slate-950/20 px-2 py-0.5 rounded text-slate-950 ml-1">
             SPACE
           </span>
         </button>
 
         {/* Car Skin Selector */}
-        <div className="flex flex-col items-center bg-slate-950/80 backdrop-blur-md p-3 md:p-4 rounded-2xl border border-slate-800/80 max-w-lg w-full">
+        <div className="flex flex-col items-center bg-slate-950/80 backdrop-blur-md p-3 md:p-4 rounded-2xl border border-slate-800/80 max-w-xl w-full">
           <div className="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-2.5">
-            Select Machine: <strong className="text-white">{selectedSkin.name}</strong>
+            Garage · <strong className="text-white">{selectedSkin.name}</strong>
+            <span className="ml-2 normal-case tracking-normal text-amber-300">★ {bankedCoins} credits</span>
           </div>
           <div className="flex items-center justify-center gap-2 flex-wrap">
             {CAR_SKINS.map((skin) => {
               const isSelected = selectedSkin.id === skin.id;
+              const isUnlocked = unlockedSkins.includes(skin.id);
+              const unlockCost = SKIN_UNLOCK_COSTS[skin.id] ?? 0;
               return (
                 <button
                   key={skin.id}
@@ -210,19 +268,23 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                   className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
                     isSelected
                       ? 'border-amber-400 bg-amber-400/10 text-white shadow-md'
-                      : 'border-slate-800 bg-slate-900/50 text-slate-400 hover:text-white hover:border-slate-700'
+                      : isUnlocked
+                        ? 'border-slate-800 bg-slate-900/50 text-slate-400 hover:text-white hover:border-slate-700'
+                        : 'border-slate-800 bg-slate-950/80 text-slate-500 hover:border-amber-500/60'
                   }`}
                 >
                   <span
                     className="w-3.5 h-3.5 rounded-full border border-white/40 shadow-sm"
                     style={{ backgroundColor: skin.primary }}
                   />
-                  <span>{skin.name}</span>
+                  <span>{isUnlocked ? skin.name : `${skin.name} · ${unlockCost}★`}</span>
                   {isSelected && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                  {!isUnlocked && <Lock className="h-3.5 w-3.5 text-amber-300" />}
                 </button>
               );
             })}
           </div>
+          {garageNotice && <p role="status" className="mt-2 text-xs font-medium text-amber-200">{garageNotice}</p>}
         </div>
       </div>
 
@@ -244,7 +306,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
         <div className="text-slate-300">
           <kbd className="px-1.5 py-0.5 bg-slate-800 rounded font-mono text-[11px] mr-1">Left/Right or A/D</kbd> Steer ·{' '}
           <kbd className="px-1.5 py-0.5 bg-slate-800 rounded font-mono text-[11px] mr-1">Space</kbd> Nitro ·{' '}
-          <kbd className="px-1.5 py-0.5 bg-slate-800 rounded font-mono text-[11px] mr-1">S</kbd> Brake
+          <kbd className="px-1.5 py-0.5 bg-slate-800 rounded font-mono text-[11px] mr-1">S / SHIFT</kbd> Brake / Drift
         </div>
       </div>
     </div>

@@ -5,6 +5,7 @@
 
 export type GameState = 'TITLE' | 'PLAYING' | 'PAUSED' | 'GAMEOVER';
 
+export type GameMode = 'endless' | 'time_trial' | 'daily_challenge';
 export type TimeOfDay = 'day' | 'sunset' | 'night';
 
 export type VehicleType = 'player' | 'sedan' | 'coupe' | 'truck' | 'police' | 'taxi';
@@ -119,11 +120,32 @@ export interface GameStats {
   combo: number;
   comboTimer: number;
   closeCalls: number;
+  driftScore: number;
+  driftChain: number;
+  bestDriftChain: number;
+  raceTime: number;
+  timeRemaining: number;
+  challengeProgress: number;
+  junctionDistance: number;
+  routeChoice: 'left' | 'right' | null;
+  routesTaken: number;
   // Active power-up states
   speedBoostActive: boolean;
   speedBoostTimer: number;
   shieldActive: boolean;
   shieldTimer: number;
+}
+
+export interface GameSettings {
+  masterVolume: number;
+  steeringSensitivity: number;
+  reducedMotion: boolean;
+  highContrast: boolean;
+  colorblindPickups: boolean;
+  largeHud: boolean;
+  touchSteering: boolean;
+  touchControlScale: number;
+  showTutorial: boolean;
 }
 
 export interface InputState {
